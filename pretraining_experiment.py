@@ -23,6 +23,7 @@ modality_dims = {"audio":[36, 20, 10], "flow":[8,6, 4], "haptics" :[13,10, 5],"v
 model_file = "conceptqa_pretrained"
 epochs = 1
 pt_model = ConceptQA(modality_dims, 768, 200, 100, pretraining=True, num_cats=len(cat_ans))
+
 crit = nn.CrossEntropyLoss()
 lr = 5.0
 
@@ -74,6 +75,7 @@ v_ll = []
 for e in range(epochs):
 	start = time.time()
 	for s, v in zip(soft_batches, vanilla_batches):
+
 		v_ll.append(train(vanilla_model, v, v_optim, crit))
 		s_ll.append(train(soft_model, s, s_optim, soft_crit, soft=True))
 	#T

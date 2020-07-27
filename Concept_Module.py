@@ -16,7 +16,7 @@ from transformers import (OpenAIGPTDoubleHeadsModel, OpenAIGPTLMHeadModel, OpenA
 class ConceptQA(nn.Module):
 	def __init__(self, tuples, q_dim, hid_dim, emb_dim, num_cats=None, pretraining=False, coattn=True):
 		super().__init__()
-		device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+		self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 		self.vocab = pickle.load(open("vocab", "rb"))
 		#self.vocab = process_answer_corpus()
 		self.idx_to_w = dict((y,x) for x,y in self.vocab.items())
@@ -95,6 +95,7 @@ class ConceptQA(nn.Module):
 	def forward(self, question, object):
 
 		codes = []
+
 		q, attn_mask = self.Q_embed.process(question)
 		Q = self.Q_embed(q, attn_mask)
 		i = 0
@@ -103,7 +104,7 @@ class ConceptQA(nn.Module):
 			#
 			#if i != 10:
 			for modality in action:
-				feat = torch.tensor(action[modality], dtype=torch.float)
+				feat = torch.tensor(action[modality], dtype=torch.float).to(self.device)
 
 				x = self.encoders[modality](feat)
 				if len(x.shape) == 1:
