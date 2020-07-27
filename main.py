@@ -1,5 +1,5 @@
 from Concept_Module import *
-
+from Noam import NoamOptim
 
 data = pickle.load(open("datafile", "rb"))
 ans = pickle.load(open("ansfile", "rb"))
@@ -14,8 +14,10 @@ conceptqa = ConceptQA(modality_dims, 768, 200, 100)
 crit = nn.CrossEntropyLoss()
 lr = 5.0
 #optim = torch.optim.SGD(conceptqa.parameters(), lr=lr)
-optim = torch.optim.Adam(conceptqa.parameters(), 1e-3)
-scheduler = torch.optim.lr_scheduler.StepLR(optim, 1, gamma=0.95)
+#optim = torch.optim.Adam(conceptqa.parameters(), 1e-3)
+optim = NoamOptim(conceptqa.parameters(), 100)
+#scheduler = torch.optim.lr_scheduler.StepLR(optim, 1, gamma=0.95)
+
 prev = np.float("inf")
 
 for e in range(epochs):
@@ -25,7 +27,7 @@ for e in range(epochs):
     if val_loss < prev:
         prev = val_loss
         best_model = conceptqa
-    scheduler.step()
+    #scheduler.step()
     elapsed = time.time() - start
     print("Epoch:", start, val_loss)
     start = time.time()

@@ -14,10 +14,11 @@ from transformers import (OpenAIGPTDoubleHeadsModel, OpenAIGPTLMHeadModel, OpenA
                                   GPT2DoubleHeadsModel, GPT2LMHeadModel, GPT2Tokenizer)
 
 class ConceptQA(nn.Module):
-	def __init__(self, tuples, q_dim, hid_dim, emb_dim):
+	def __init__(self, tuples, q_dim, hid_dim, emb_dim, num_cats=None, pretraining=False, coattn=True):
 		super().__init__()
 		device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-		self.vocab = process_answer_corpus()
+		self.vocab = pickle.load(open("vocab", "rb"))
+		#self.vocab = process_answer_corpus()
 		self.idx_to_w = dict((y,x) for x,y in self.vocab.items())
 		self.init_network(tuples)
 		self.hid_dim = hid_dim
@@ -25,10 +26,16 @@ class ConceptQA(nn.Module):
 		self.q_proj = nn.Linear(q_dim, emb_dim)
 		self.MM_embed = nn.Linear(432, emb_dim)
 		self.max_len = 11
-		tokens = 9
-		#self.special_tokens = [101, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 301 ]
-		self.decoder = TransformerModel(len(self.vocab), emb_dim)
-		#self.init_weights()
+		self.decoder = TransformerModel(len(self.vocab), emb_dim, pretraining)
+		self.coattn = coattn
+		if not coattn:
+			#double check concat mm dim
+			self.MM_embed = nn.Linear(144, emb_dim)
+		if pretraining:
+			self.pred_layers = nn.Sequential(nn.Linear(1100, 550),
+			                                 nn.LeakyReLU(), nn.Linear(550, num_cats) )
+			self.pretrain = pretraining
+
 
 	def init_network(self, tuples):
 		temp = {}
@@ -49,6 +56,9 @@ class ConceptQA(nn.Module):
 		self.tokenizer.set_special_tokens(self.special_tokens)
 		self.decoder.set_num_special_tokens(len(self.special_tokens))
 		"""
+	def fine_tune(self):
+		self.pred_layers.requires_grad = False
+		self.pretrain = False
 
 
 	def parallel_co_attention(self, Q, E):
@@ -83,6 +93,7 @@ class ConceptQA(nn.Module):
 
 
 	def forward(self, question, object):
+
 		codes = []
 		q, attn_mask = self.Q_embed.process(question)
 		Q = self.Q_embed(q, attn_mask)
@@ -105,23 +116,28 @@ class ConceptQA(nn.Module):
 			i += 1
 
 			code = torch.cat(modalities)
-			code = self.parallel_co_attention(Q, code)
+			if self.coattn:
+				code = self.parallel_co_attention(Q, code)
+			else: code = self.MM_embed(code)
 			codes.append(code)
 		Q = F.tanh(self.q_proj(Q))
 		codes = torch.stack([Q] + codes)
 		codes = codes.permute(1, 0, 2)
-		"""if answer is not None:
-			# pass codes and answers to tranformer
-			#training
-			pass
-		else:
-			pass
-			#inference
-"""
-		#input = self.build_input(Q, codes, answer)
+
+
+		if self.pretrain:
+			src = self.decoder.pos_encoder(codes)
+			out = self.decoder.transformer_encoder(src, None)
+			out = out.flatten(0)
+			out = self.pred_layers(out)
+			return out
+			#return F.log_softmax(out, dim=-1)
 		out = self.decoder(codes)
-		#return F.log_softmax(out, dim=-1)
 		return out
+
+
+
+
 
 
 class Encoder(nn.Module):
@@ -172,7 +188,7 @@ def idx_to_word(preds, idx_2_w):
 
 def process_answer_corpus():
 	vocab = {"pad": 0}
-	answers = pickle.load(open("ansfile", "rb"))
+	answers = pickle.load(open("vanilla_ans", "rb"))
 	tokenizer = spacy.load("en_core_web_sm")
 	i = 1
 	for ans in answers:
@@ -182,23 +198,75 @@ def process_answer_corpus():
 			if w not in vocab:
 				vocab[w] = i
 				i += 1
+	pickle.dump(vocab, open("vocab", "wb"))
 	return vocab
 
-def train(net, data, optim, crit):
+def pretrain(net, data, optim, crit):
+	net.train()
+	total_loss = 0
+	start = time.time()
+
+	i = 1
+	for d in data:
+		q, feats, targets = d[0], d[1][0][1], d[2]
+		targets = torch.tensor(targets).unsqueeze(0)
+		if "labels" in feats.keys():
+			feats.pop("labels")
+		net.zero_grad()
+		preds = net(q, feats)
+
+		preds = preds.unsqueeze(0)
+		loss = crit(preds, targets)
+		loss.backward()
+		torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
+		optim.step()
+		# think about clipping gradients
+		total_loss += loss.item()
+		i += 1
+		"""
+		if i % 200 == 0 and i > 0:
+			cur_loss = total_loss / 200
+			elapsed = time.time() - start
+			temp = F.softmax(preds, dim=1)
+			_, idxs = temp.max(dim=1)
+
+			print("Training\n", "time: ", elapsed, "s\n", "running loss: ", cur_loss)
+			print(loss.item())
+			total_loss = 0
+			start = time.time()"""
+	cur_loss = total_loss / 200
+	elapsed = time.time() - start
+	temp = F.softmax(preds, dim=1)
+	_, idxs = temp.max(dim=1)
+
+	print("Training\n", "time: ", elapsed, "s\n", "running loss: ", cur_loss)
+	print(loss.item())
+
+
+
+	return net, cur_loss
+
+def train(net, data, optim, crit, soft=False):
 
 	#optim = Adam(net.parameters(), 1e-3)
 	net.train()
 	total_loss = 0
 	start = time.time()
 	toks = len(net.vocab)
+	loss_list = []
 
 
-	i = 0
+	i = 1
 	for d in data:
 		q, feats, targets = d[0], d[1][0][1], d[2]
 		if "labels" in feats.keys():
 			feats.pop("labels")
-		targets = build_targets(targets, net.vocab, net.max_len)
+		if soft:
+			target_list = []
+			for t in targets:
+				target_list.append(build_targets(t, net.vocab, net.max_len))
+			targets = target_list
+		else: targets = build_targets(targets, net.vocab, net.max_len)
 		net.zero_grad()
 		preds_ = net(q, feats)
 
@@ -210,9 +278,9 @@ def train(net, data, optim, crit):
 		#think about clipping gradients
 		total_loss += loss.item()
 		i += 1
-
-		if i % 500 == 0 and i > 0:
-			cur_loss = total_loss / 500
+		"""
+		if i % 200 == 0 and i > 0:
+			cur_loss = total_loss / 200
 			elapsed = time.time() - start
 			temp = F.softmax(preds_, dim=2)
 			_, idxs = temp.max(dim=2)
@@ -224,14 +292,32 @@ def train(net, data, optim, crit):
 			print("A:", answer)
 			print("Pred:", words)
 			total_loss = 0
-			start = time.time()
+			start = time.time()"""
+	cur_loss = total_loss / 200
+	elapsed = time.time() - start
+	temp = F.softmax(preds_, dim=2)
+	_, idxs = temp.max(dim=2)
+	words = idx_to_word(idxs, net.idx_to_w)
+	# TODO: copy this over to evaluate (or just replace it)
+	if soft:
+		answer = []
+		for t in targets:
+			answer.append(idx_to_word(t, net.idx_to_w))
 
-def evaluate(net, data, crit):
+	else: answer = idx_to_word(targets, net.idx_to_w)
+	print("Training\n", "time: ", elapsed, "s\n", "running loss: ", cur_loss)
+	print(loss.item())
+	print("Q:", q)
+	print("A:", answer)
+	print("Pred:", words)
+	return cur_loss
+
+def evaluate(net, data, crit, pt=False, soft=False):
 	net.eval()
 	total_loss = 0
 	start = time.time()
 	toks = len(net.vocab)
-	data = data[:int(len(data)/5)]
+	#data = data[:int(len(data)/5)]
 
 	i = 0
 	preds_list = []
@@ -239,25 +325,33 @@ def evaluate(net, data, crit):
 		for d in data:
 			q, feats, targets = d[0], d[1][0][1], d[2]
 			if "labels" in feats.keys(): feats.pop("labels")
-			targets = build_targets(targets, net.vocab, net.max_len)
-			net.zero_grad()
-			preds_ = net(q, feats)
-			preds = preds_.view(-1, toks)
-			preds_list.append(preds_)
-			loss = crit(preds, torch.tensor(targets))
 
+			net.zero_grad()
+			preds = net(q, feats)
+			if not pt:
+				if soft:
+					target_list = []
+					for t in targets:
+						target_list.append(build_targets(t, net.vocab, net.max_len))
+					targets = target_list
+				else: targets = build_targets(targets, net.vocab, net.max_len)
+				preds = preds.view(-1, toks)
+
+			preds_list.append(preds)
+			preds = preds.unsqueeze(0)
+
+			if pt: loss = crit(preds, torch.tensor(targets).unsqueeze(0))
+			else: loss = crit(preds.squeeze(0), torch.tensor(targets))
 			# think about clipping gradients
 			total_loss += loss.item()
 			i += 1
 
-			if i % 500 == 0 and i > 0:
-				cur_loss = total_loss / 100
-				elapsed = time.time() - start
-				print("Validation\n", elapsed, "s\n", "running loss: ", cur_loss)
-				print(loss.item())
-				total_loss = 0
-				start = time.time()
 
-			return total_loss / (len(data) - 1), preds_list
+	cur_loss = total_loss / 100
+	elapsed = time.time() - start
+	print("Validation\n", elapsed, "s\n", "running loss: ", cur_loss)
+	print(loss.item())
+
+	return cur_loss, preds_list
 
 

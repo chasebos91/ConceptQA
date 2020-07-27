@@ -277,146 +277,375 @@ def get_adj():
 
 
 
-def single_gen(obj_names):
+def single_gen(obj_names, cat=False, soft_labels=False):
 	# either q type 1 or 2
-
 	adj = get_adj()
 	tokenizer = spacy.load("en_core_web_sm")
 
 	tuples = []
 	answers = ["yes", "no"]
-	#TODO: include contents!!
+	# TODO: include question type
 
 	categories = {"material": ["plastic", "rubber", "metal", "wicker", "foam"],
 	              "texture": ["hard", "soft", "squishy"], "shape": ["cylindrical", "round", "cone", "rectangular"],
 	              "size": ["small", "large", "wide"], "weight": ["heavy", "light"]}
-	adj_list = ["plastic", "rubber", "metal", "wicker", "foam", "hard", "soft", "squishy", "cylindrical", "round", "cone", "rectangular",
+	adj_list = ["plastic", "rubber", "metal", "wicker", "foam", "hard", "soft", "squishy", "cylindrical", "round",
+	            "cone", "rectangular",
 	            "small", "large", "wide", "heavy", "light"]
 
 	ans_formats = ["The object is ", "It's "]
 	category_formats = [["The ", " of the object is "], ["The object ", " is "], ["The ", " is "]]
+	if not cat and not soft_labels:
 
-	# TODO make sure that the object has its name (k, v)
+		# one type
+		for o in obj_names.keys():
+			# need to change object names that are weird to natural text
+			name = make_names_normal(o)
+			q_format = ["What color is the object?", "What's the object's color?", "Describe the object color.", "Describe the color of the object.", "What's the color?"]
+			color = get_color_label(obj_names[o])
+			color_ans = ans_formats + ["The color of the object is ", "The object's color is ", "The color is "]
 
-	# one type
-	for o in obj_names.keys():
-		# need to change object names that are weird to natural text
-		name = make_names_normal(o)
-		q_format = ["What color is the object?", "What's the object's color?", "Describe the object color.", "Describe the color of the object.", "What's the color?"]
-		color = get_color_label(obj_names[o])
-		color_ans = ans_formats + ["The color of the object is ", "The object's color is ", "The color is "]
-
-		if color != None:
-			for q in q_format:
-				for a in color_ans:
-					ans = a + color + "."
-					ans1 = tokenizer(ans)
-					ans1 = [token.text for token in ans1]
-					tuples.append([q, [(o, obj_names[o])], ans1])
-					if ans not in answers:
-						answers.append(ans)
+			if color != None:
+				for q in q_format:
+					for a in color_ans:
+						ans = a + color + "."
+						ans1 = tokenizer(ans)
+						ans1 = [token.text for token in ans1]
+						tuples.append([q, [(o, obj_names[o])], ans1, "descriptive"])
+						if ans not in answers:
+							answers.append(ans)
 
 
-		q_format = [["What is the ", " of the object?"], ["What's the object's ", "?"], ["What's the ", " of the object?"], ["Describe the ", " of the object."], ["Describe the ", "."], ["What's the ", "?"]]
-		for c in categories.keys():
-			adjs = categories[c]
+			q_format = [["What is the ", " of the object?"], ["What's the object's ", "?"], ["What's the ", " of the object?"], ["Describe the ", " of the object."], ["Describe the ", "."], ["What's the ", "?"]]
+			for c in categories.keys():
+				adjs = categories[c]
 
-			for a in adjs:
-				if a in obj_names[o]["labels"]:
-					for question in q_format:
+				for a in adjs:
+					if a in obj_names[o]["labels"]:
+						for question in q_format:
 
-						for cq in category_formats:
-							ans = cq[0] + c + cq[1] + a + "."
-							ans1 = tokenizer(ans)
-							ans1 = [token.text for token in ans1]
+							for cq in category_formats:
+								ans = cq[0] + c + cq[1] + a + "."
+								ans1 = tokenizer(ans)
+								ans1 = [token.text for token in ans1]
+								q = question[0] + c + question[1]
+								tuples.append([q, [(o, obj_names[o])], ans1, "descriptive"])
+								if ans not in answers: answers.append(ans)
+
+							for af in ans_formats:
+								ans = af + a + "."
+								ans1 = tokenizer(ans)
+								ans1 = [token.text for token in ans1]
+								q = question[0] + c + question[1]
+								tuples.append([q, [(o, obj_names[o])], ans1, "descriptive"])
+								if ans not in answers: answers.append(ans)
+
+
+			q_format = ["Is the object heavy or light?", "What is the weight of the object?", "What's the object's weight?", "How heavy is the object?", "Describe the object's weight.", "Describe the object's heaviness.", "What's the weight of the object?"]
+			if "heavy" in obj_names[o]["labels"] or "light" in obj_names[o]["labels"]:
+				for q in q_format:
+					if "heavy" in obj_names[o]["labels"]: a = "heavy"
+					else: a = "light"
+
+					for cq in category_formats:
+						ans = cq[0] + "weight" + cq[1] + a + "."
+						ans1 = tokenizer(ans)
+						ans1 = [token.text for token in ans1]
+						tuples.append([q, [(o, obj_names[o])], ans1, "descriptive"])
+						if ans not in answers: answers.append(ans)
+
+					for af in ans_formats:
+						ans = af + a + "."
+						ans1 = tokenizer(ans)
+						ans1 = [token.text for token in ans1]
+						tuples.append([q, [(o, obj_names[o])], ans1, "descriptive"])
+						if ans not in answers: answers.append(ans)
+
+
+			# another type
+			negative = ["It is not.", "It isn't.", "Nope.", "No."]
+			positive = ["Yes it is.", "It is.", "Yep.", "Yes."]
+
+
+
+			#Get rid of all adjectives which are actually names
+			q_format = [["Is the object ","?"], ["Would you describe the object as ", "?"]]
+			i = 0
+			for question in q_format:
+				for a in adj_list:
+					q = question[0] + a + question[1]
+					if a in adj_list:
+						obj, _, _ = o.partition(" ")
+						labels = obj_names[o]["labels"]
+						if a in labels:
+
+							for ans in positive:
+								ans1 = tokenizer(ans)
+								ans1 = [token.text for token in ans1]
+								i += 1
+								tuples.append([q, [(o, obj_names[o])], ans1, "yes"])
+								if ans not in answers: answers.append(ans)
+
+						else:
+							for ans in negative:
+								ans1 = tokenizer(ans)
+								i += 1
+								ans1 = [token.text for token in ans1]
+								tuples.append([q, [(o, obj_names[o])], ans1, "no"])
+								if ans not in answers: answers.append(ans)
+
+		#print(i)
+		print(len(tuples))
+		return tuples, answers
+	if soft_labels:
+
+
+		for o in obj_names.keys():
+			# need to change object names that are weird to natural text
+			name = make_names_normal(o)
+			q_format = ["What color is the object?", "What's the object's color?", "Describe the object color.",
+			            "Describe the color of the object.", "What's the color?"]
+			color = get_color_label(obj_names[o])
+			color_ans = ans_formats + ["The color of the object is ", "The object's color is ", "The color is "]
+
+			if color != None:
+				for q in q_format:
+					ans_list = []
+					for a in color_ans:
+						ans = a + color + "."
+						ans1 = tokenizer(ans)
+						ans1 = [token.text for token in ans1]
+						ans_list.append(ans1)
+
+						if ans not in answers:
+							answers.append(ans)
+					tuples.append([q, [(o, obj_names[o])], ans_list, "descriptive"])
+
+			q_format = [["What is the ", " of the object?"], ["What's the object's ", "?"],
+			            ["What's the ", " of the object?"], ["Describe the ", " of the object."],
+			            ["Describe the ", "."], ["What's the ", "?"]]
+			for c in categories.keys():
+				adjs = categories[c]
+
+				for a in adjs:
+
+					if a in obj_names[o]["labels"]:
+						for question in q_format:
+							ans_list = []
 							q = question[0] + c + question[1]
-							tuples.append([q, [(o, obj_names[o])], ans1])
-							if ans not in answers: answers.append(ans)
+							for cq in category_formats:
+								ans = cq[0] + c + cq[1] + a + "."
+								ans1 = tokenizer(ans)
+								ans1 = [token.text for token in ans1]
 
-						for af in ans_formats:
-							ans = af + a + "."
-							ans1 = tokenizer(ans)
-							ans1 = [token.text for token in ans1]
-							q = question[0] + c + question[1]
-							tuples.append([q, [(o, obj_names[o])], ans1])
-							if ans not in answers: answers.append(ans)
+								ans_list.append(ans1)
+								if ans not in answers: answers.append(ans)
 
 
-		q_format = ["Is the object heavy or light?", "What is the weight of the object?", "What's the object's weight?", "How heavy is the object?", "Describe the object's weight.", "Describe the object's heaviness.", "What's the weight of the object?"]
-		if "heavy" in obj_names[o]["labels"] or "light" in obj_names[o]["labels"]:
-			for q in q_format:
-				if "heavy" in obj_names[o]["labels"]: a = "heavy"
-				else: a = "light"
+							for af in ans_formats:
+								ans = af + a + "."
+								ans1 = tokenizer(ans)
+								ans1 = [token.text for token in ans1]
+								#q = question[0] + c + question[1]
+								ans_list.append(ans1)
+								if ans not in answers: answers.append(ans)
+							tuples.append([q, [(o, obj_names[o])], ans_list, "descriptive"])
 
-				for cq in category_formats:
-					ans = cq[0] + "weight" + cq[1] + a + "."
-					ans1 = tokenizer(ans)
-					ans1 = [token.text for token in ans1]
-					tuples.append([q, [(o, obj_names[o])], ans1])
-					if ans not in answers: answers.append(ans)
-
-				for af in ans_formats:
-					ans = af + a + "."
-					ans1 = tokenizer(ans)
-					ans1 = [token.text for token in ans1]
-					tuples.append([q, [(o, obj_names[o])], ans1])
-					if ans not in answers: answers.append(ans)
-
-
-		# another type
-		negative = ["It is not.", "It isn't.", "Nope.", "No."]
-		positive = ["Yes it is.", "It is.", "Yep.", "Yes."]
-
-
-
-		#Get rid of all adjectives which are actually names
-		q_format = [["Is the object ","?"], ["Would you describe the object as ", "?"]]
-		i = 0
-		for question in q_format:
-			for a in adj_list:
-				q = question[0] + a + question[1]
-				if a in adj_list:
-					obj, _, _ = o.partition(" ")
-					labels = obj_names[o]["labels"]
-					if adj in labels:
-
-						for ans in positive:
-							ans1 = tokenizer(ans)
-							ans1 = [token.text for token in ans1]
-							i += 1
-							tuples.append([q, [(o, obj_names[o])], ans1])
-							if ans not in answers: answers.append(ans)
-
+			q_format = ["Is the object heavy or light?", "What is the weight of the object?",
+			            "What's the object's weight?", "How heavy is the object?", "Describe the object's weight.",
+			            "Describe the object's heaviness.", "What's the weight of the object?"]
+			if "heavy" in obj_names[o]["labels"] or "light" in obj_names[o]["labels"]:
+				for q in q_format:
+					if "heavy" in obj_names[o]["labels"]:
+						a = "heavy"
 					else:
-						for ans in negative:
-							ans1 = tokenizer(ans)
-							i += 1
-							ans1 = [token.text for token in ans1]
-							tuples.append([q, [(o, obj_names[o])], ans1])
+						a = "light"
+					ans_list = []
+					for cq in category_formats:
+						ans = cq[0] + "weight" + cq[1] + a + "."
+						ans1 = tokenizer(ans)
+						ans1 = [token.text for token in ans1]
+						#tuples.append([q, [(o, obj_names[o])], ans1])
+						ans_list.append(ans1)
+						if ans not in answers: answers.append(ans)
+
+					for af in ans_formats:
+						ans = af + a + "."
+						ans1 = tokenizer(ans)
+						ans1 = [token.text for token in ans1]
+						#tuples.append([q, [(o, obj_names[o])], ans1])
+						ans_list.append(ans1)
+						if ans not in answers: answers.append(ans)
+					tuples.append([q, [(o, obj_names[o])], ans_list, "descriptive"])
+
+			# another type
+			negative = ["It is not.", "It isn't.", "Nope.", "No."]
+			positive = ["Yes it is.", "It is.", "Yep.", "Yes."]
+
+			# Get rid of all adjectives which are actually names
+			q_format = [["Is the object ", "?"], ["Would you describe the object as ", "?"]]
+			i = 0
+			for question in q_format:
+				for a in adj_list:
+					q = question[0] + a + question[1]
+					if a in adj_list:
+						obj, _, _ = o.partition(" ")
+						labels = obj_names[o]["labels"]
+
+						if a in labels:
+							ans_list = []
+							for ans in positive:
+								ans1 = tokenizer(ans)
+								ans1 = [token.text for token in ans1]
+								i += 1
+								ans_list.append(ans1)
+								if ans not in answers: answers.append(ans)
+							tuples.append([q, [(o, obj_names[o])], ans_list, "yes"])
+						else:
+							ans_list = []
+							for ans in negative:
+								ans1 = tokenizer(ans)
+								i += 1
+								ans1 = [token.text for token in ans1]
+								ans_list.append(ans1)
+								if ans not in answers: answers.append(ans)
+							tuples.append([q, [(o, obj_names[o])], ans_list, "no"])
+
+		# print(i)
+		print(len(tuples))
+		return tuples, answers
+
+	##CATEGORY DATASET
+	if cat:
+		indx = {}
+		i = 0
+		for values in categories.values():
+			for w in values:
+				indx[w] = i
+				i += 1
+		color = ["red", "yellow", "purple", "pink", "brown", "tan", "green", "multicolored", "orange"]
+		for c in color:
+			indx[c] = i
+			i+= 1
+		indx['yes'] = i
+		indx['no'] = i + 1
+
+		for o in obj_names.keys():
+			# need to change object names that are weird to natural text
+			name = make_names_normal(o)
+			q_format = ["What color is the object?", "What's the object's color?", "Describe the object color.", "Describe the color of the object.", "What's the color?"]
+			color = get_color_label(obj_names[o])
+
+
+			if color != None:
+				for q in q_format:
+
+					ans = indx[color]
+					tuples.append([q, [(o, obj_names[o])], ans, "descriptive"])
+
+
+			q_format = [["What is the ", " of the object?"], ["What's the object's ", "?"], ["What's the ", " of the object?"], ["Describe the ", " of the object."], ["Describe the ", "."], ["What's the ", "?"]]
+			for c in categories.keys():
+				adjs = categories[c]
+
+				for a in adjs:
+					if a in obj_names[o]["labels"]:
+						for question in q_format:
+
+							ans = indx[a]
+							q = question[0] + c + question[1]
+							tuples.append([q, [(o, obj_names[o])], ans, "descriptive"])
 							if ans not in answers: answers.append(ans)
 
-	print(i)
-	print(len(tuples))
-	return tuples, answers
+
+
+			q_format = ["Is the object heavy or light?", "What is the weight of the object?", "What's the object's weight?", "How heavy is the object?", "Describe the object's weight.", "Describe the object's heaviness.", "What's the weight of the object?"]
+			if "heavy" in obj_names[o]["labels"] or "light" in obj_names[o]["labels"]:
+				for q in q_format:
+					if "heavy" in obj_names[o]["labels"]: a = "heavy"
+					else: a = "light"
+
+					ans =  indx[a]
+
+					tuples.append([q, [(o, obj_names[o])], ans, "descriptive"])
+					if ans not in answers: answers.append(ans)
+
+
+
+
+			# another type
+
+			#Get rid of all adjectives which are actually names
+			q_format = [["Is the object ","?"], ["Would you describe the object as ", "?"]]
+
+			for question in q_format:
+				for a in adj_list:
+					q = question[0] + a + question[1]
+					if a in adj_list:
+						obj, _, _ = o.partition(" ")
+						labels = obj_names[o]["labels"]
+						if a in labels:
+							ans = indx["yes"]
+							tuples.append([q, [(o, obj_names[o])], ans, "yes"])
+
+
+						else:
+							ans = indx["no"]
+							tuples.append([q, [(o, obj_names[o])], ans, "no"])
+
+
+
+		print(len(tuples))
+		return tuples, answers, indx
 
 
 def build_dataset():
 	obj_names = build_feature_set()
 	#tp, ap = pair_gen(obj_names)
-	ts, asingle = single_gen(obj_names)
-	print("single tupes: ", len(ts))
+	cat_dataset, cat_ans, indx = single_gen(obj_names, cat=True)
+	soft_dataset, soft_ans = single_gen(obj_names, soft_labels=True)
+	reg_dataset, reg_ans = single_gen(obj_names)
+
+
+	print("single tupes: ", len(reg_dataset))
 	#print("pair tupes: ", len(tp))
 	#tuples = tp + ts
 	#answers = asingle + ap
+
 	sentences = []
-	for s in ts:
+	for s in reg_dataset:
 		if s[0] not in sentences:
 			sentences.append(s[0])
-	return ts, asingle,  sentences
 
-dataset, answers, corpus = build_dataset()
-random.shuffle(dataset)
 
+	return (reg_dataset, reg_ans), (soft_dataset, soft_ans), (cat_dataset, cat_ans), sentences, indx
+
+
+#main
+reg, soft, cat, sentences, cat_answer_key = build_dataset()
+random.shuffle(reg[0])
+random.shuffle(soft[0])
+random.shuffle(cat[0])
+
+file_names = [[reg, "vanilla_data", "vanilla_ans" ], [soft, "soft_data", "soft_ans"], [cat, "cat_data", "cat_ans"]]
+
+for data, f1, f2 in file_names:
+	fd = open(f1, "wb")
+	fa = open(f2, "wb")
+	pickle.dump(data[0], fd)
+	pickle.dump(data[1], fa)
+	fd.close()
+	fa.close()
+
+f = open("cat_ans_key", "wb")
+pickle.dump(cat_answer_key, f)
+f.close()
+
+f = open("corpus", "wb")
+pickle.dump(sentences, f)
+f.close()
+
+"""	
 dfile = "datafile"
 ans = "ansfile"
 c = "corpus"
@@ -435,5 +664,5 @@ ofc.close()
 data = pickle.load(open("datafile", "rb"))
 ans = pickle.load(open("ansfile", "rb"))
 a = data[0]
-
+"""
 
