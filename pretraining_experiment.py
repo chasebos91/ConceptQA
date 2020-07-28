@@ -1,24 +1,44 @@
+
+import numpy as np
+from soft_CE_loss import *
+from Concept_Module import *
+from Concept_Module import pretrain, train, evaluate
+
+from Noam import NoamOptim
+from batching import *
+from pretraining_experiment import *
+from matplotlib import pyplot as plt
 import torch
+import numpy as np
+import time
+import random
 
 
-def pretrain(pt_model, batches, optim, crit):
-    print("new")
+def pretrain_outer(pt_model, batches, optim, crit):
+
+    model_file = "cat_pretrained"
+    epochs = 50
+    
     prev = 1000
     #remove
-    batches = [[batches[0][0]]]
+    #batches = [[batches[0][0]]]
     cat_ll = []
     for e in range(epochs):
         start = time.time()
+        random.shuffle(batches)
+        num_batches = len(batches)
+        batches = batches[:num_batches-2]
+        val_batch = batches[-1]
         for b in batches:
             cat_ll.append(pretrain(pt_model, b, optim, crit))
         #TODO:make train and val REMEMBER to remove the index on batches
-        val_loss, preds = evaluate(pt_model, batches[0], crit, pt=True)
+        val_loss, preds = evaluate(pt_model, val_batch, crit, pt=True)
         if val_loss < prev:
             prev = val_loss
             best_model = pt_model
         #scheduler.step()
         elapsed = time.time() - start
-        print("Epoch:", e, val_loss)
+        print("Epoch:", e, "Elapsed:", elapsed, val_loss)
         start = time.time()
 
 
@@ -33,11 +53,12 @@ def pretrain(pt_model, batches, optim, crit):
 
 
 def finetune(vanilla_model, soft_model, vanilla_batches, soft_batches, s_optim, v_optim, soft_crit, crit):
+    epochs = 50
     ##remove
     s_prev = 1000
     v_prev = 1000
-    vanilla_batches = [[vanilla_batches[0][0]]]
-    soft_batches = [[soft_batches[0][0]]]
+    #vanilla_batches = [[vanilla_batches[0][0]]]
+    #soft_batches = [[soft_batches[0][0]]]
     s_ll = []
     v_ll = []
     for e in range(epochs):
@@ -57,8 +78,8 @@ def finetune(vanilla_model, soft_model, vanilla_batches, soft_batches, s_optim, 
             s_best_model = soft_model
         # scheduler.step()
         elapsed = time.time() - start
-        print("Epoch:", start, v_val_loss)
-        print("Epoch:", start, s_val_loss)
+        print("Epoch:", e, "Elapsed:", elapsed, "Vanilla loss: ", v_val_loss, "Soft loss: ", s_val_loss)
+        
         start = time.time()
     return v_best_model, s_best_model, v_ll, s_ll
 

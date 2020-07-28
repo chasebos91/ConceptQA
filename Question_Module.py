@@ -14,7 +14,7 @@ class QuestionEmbed(nn.Module):
 		super(QuestionEmbed, self).__init__()
 		self.device = device
 		self.model = DistilBertModel.from_pretrained('distilbert-base-uncased-distilled-squad').to(self.device)
-		self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased-distilled-squad').to(self.device)
+		self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased-distilled-squad')
 		self.max_len = 17
 
 	def process(self, sentences):
@@ -28,8 +28,8 @@ class QuestionEmbed(nn.Module):
 			if tok != 0: attn_mask += [1]
 			else: attn_mask += [0]
 
-		attn_mask = torch.tensor(attn_mask)
-		x = torch.tensor(pad)
+		attn_mask = torch.tensor(attn_mask).to(self.device)
+		x = torch.tensor(pad).to(self.device)
 
 		return x, attn_mask
 

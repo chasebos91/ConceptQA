@@ -23,15 +23,15 @@ class ConceptQA(nn.Module):
 		self.idx_to_w = dict((y,x) for x,y in self.vocab.items())
 		self.init_network(tuples)
 		self.hid_dim = hid_dim
-		self.Q_embed = QuestionEmbed()
-		self.q_proj = nn.Linear(q_dim, emb_dim)
-		self.MM_embed = nn.Linear(432, emb_dim)
+		self.Q_embed = QuestionEmbed(self.device)
+		self.q_proj = nn.Linear(q_dim, emb_dim).to(self.device)
+		self.MM_embed = nn.Linear(432, emb_dim).to(self.device)
 		self.max_len = 11
-		self.decoder = TransformerModel(len(self.vocab), emb_dim, pretraining)
+		self.decoder = TransformerModel(len(self.vocab), emb_dim, pretraining).to(self.device)
 		self.coattn = coattn
 		if not coattn:
 			#double check concat mm dim
-			self.MM_embed = nn.Linear(144, emb_dim)
+			self.MM_embed = nn.Linear(144, emb_dim).to(self.device)
 		if pretraining:
 			self.pred_layers = nn.Sequential(nn.Linear(1100, 550),
 			                                 nn.LeakyReLU(), nn.Linear(550, num_cats) ).to(self.device)
@@ -42,7 +42,7 @@ class ConceptQA(nn.Module):
 		temp = {}
 
 		for k in tuples.keys():
-			temp[k] = Encoder(tuples[k][0], tuples[k][1], tuples[k][2], self.device)
+			temp[k] = Encoder(tuples[k][0], tuples[k][1], tuples[k][2], self.device).to(self.device)
 			#nn.init.uniform_(temp[k].weight, -initrange, initrange)
 		self.encoders = nn.ModuleDict(temp)
 
@@ -99,6 +99,7 @@ class ConceptQA(nn.Module):
 
 		q, attn_mask = self.Q_embed.process(question)
 		Q = self.Q_embed(q, attn_mask)
+		Q = Q.to(self.device)
 		i = 0
 		for action in object.values():
 			modalities = []
@@ -106,7 +107,6 @@ class ConceptQA(nn.Module):
 			#if i != 10:
 			for modality in action:
 				feat = torch.tensor(action[modality], dtype=torch.float).to(self.device)
-				print(feat.cuda())
 
 				x = self.encoders[modality](feat)
 				if len(x.shape) == 1:
@@ -243,8 +243,8 @@ def pretrain(net, data, optim, crit):
 	temp = F.softmax(preds, dim=1)
 	_, idxs = temp.max(dim=1)
 
-	print("Training\n", "time: ", elapsed, "s\n", "running loss: ", cur_loss)
-	print(loss.item())
+	#print("Training\n", "time: ", elapsed, "s\n", "running loss: ", cur_loss)
+	#print(loss.item())
 
 
 
@@ -271,11 +271,12 @@ def train(net, data, optim, crit, soft=False):
 				target_list.append(build_targets(t, net.vocab, net.max_len))
 			targets = target_list
 		else: targets = build_targets(targets, net.vocab, net.max_len)
+		targets = torch.tensor(targets).to(net.device)
 		net.zero_grad()
 		preds_ = net(q, feats)
 
 		preds = preds_.view(-1, toks)
-		loss = crit(preds, torch.tensor(targets))
+		loss = crit(preds, targets)
 		loss.backward()
 		torch.nn.utils.clip_grad_norm_(net.parameters(), 0.5)
 		optim.step()
@@ -299,6 +300,8 @@ def train(net, data, optim, crit, soft=False):
 			start = time.time()"""
 	cur_loss = total_loss / 200
 	elapsed = time.time() - start
+	
+	"""
 	temp = F.softmax(preds_, dim=2)
 	_, idxs = temp.max(dim=2)
 	words = idx_to_word(idxs, net.idx_to_w)
@@ -313,7 +316,7 @@ def train(net, data, optim, crit, soft=False):
 	print(loss.item())
 	print("Q:", q)
 	print("A:", answer)
-	print("Pred:", words)
+	print("Pred:", words)"""
 	return cur_loss
 
 def evaluate(net, data, crit, pt=False, soft=False):
@@ -343,18 +346,18 @@ def evaluate(net, data, crit, pt=False, soft=False):
 
 			preds_list.append(preds)
 			preds = preds.unsqueeze(0)
-
-			if pt: loss = crit(preds, torch.tensor(targets).unsqueeze(0))
-			else: loss = crit(preds.squeeze(0), torch.tensor(targets))
+			targets = torch.tensor(targets).to(net.device)
+			if pt: loss = crit(preds, targets.unsqueeze(0))
+			else: loss = crit(preds.squeeze(0), targets)
 			# think about clipping gradients
 			total_loss += loss.item()
 			i += 1
 
 
-	cur_loss = total_loss / 100
+	cur_loss = total_loss / 200
 	elapsed = time.time() - start
-	print("Validation\n", elapsed, "s\n", "running loss: ", cur_loss)
-	print(loss.item())
+	#print("Validation\n", elapsed, "s\n", "running loss: ", cur_loss)
+	#print(loss.item())
 
 	return cur_loss, preds_list
 
