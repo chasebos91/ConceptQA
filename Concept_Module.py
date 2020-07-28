@@ -17,6 +17,7 @@ class ConceptQA(nn.Module):
 	def __init__(self, tuples, q_dim, hid_dim, emb_dim, num_cats=None, pretraining=False, coattn=True):
 		super().__init__()
 		self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+		#print('Using device:', self.device)
 		self.vocab = pickle.load(open("vocab", "rb"))
 		#self.vocab = process_answer_corpus()
 		self.idx_to_w = dict((y,x) for x,y in self.vocab.items())
@@ -33,7 +34,7 @@ class ConceptQA(nn.Module):
 			self.MM_embed = nn.Linear(144, emb_dim)
 		if pretraining:
 			self.pred_layers = nn.Sequential(nn.Linear(1100, 550),
-			                                 nn.LeakyReLU(), nn.Linear(550, num_cats) )
+			                                 nn.LeakyReLU(), nn.Linear(550, num_cats) ).to(self.device)
 			self.pretrain = pretraining
 
 
@@ -41,7 +42,7 @@ class ConceptQA(nn.Module):
 		temp = {}
 
 		for k in tuples.keys():
-			temp[k] = Encoder(tuples[k][0], tuples[k][1], tuples[k][2])
+			temp[k] = Encoder(tuples[k][0], tuples[k][1], tuples[k][2], self.device)
 			#nn.init.uniform_(temp[k].weight, -initrange, initrange)
 		self.encoders = nn.ModuleDict(temp)
 
@@ -105,6 +106,7 @@ class ConceptQA(nn.Module):
 			#if i != 10:
 			for modality in action:
 				feat = torch.tensor(action[modality], dtype=torch.float).to(self.device)
+				print(feat.cuda())
 
 				x = self.encoders[modality](feat)
 				if len(x.shape) == 1:
@@ -142,16 +144,17 @@ class ConceptQA(nn.Module):
 
 
 class Encoder(nn.Module):
-	def __init__(self, in_dim, hid_dim, out_dim):
+	def __init__(self, in_dim, hid_dim, out_dim, device):
 		super().__init__()
 		self.net = nn.Sequential(weight_norm(nn.Linear(in_dim, hid_dim), dim=None),
 		                          nn.ReLU(),
 		                          weight_norm(nn.Linear(hid_dim, out_dim), dim=None), nn.ReLU())
+		self.device = device
 
 		self.net.apply(self.init_weights)
 
 	def forward(self, x):
-		return self.net(x)
+		return self.net(x.to(self.device))
 
 	def init_weights(self, m):
 		initrange = 0.1
@@ -210,7 +213,7 @@ def pretrain(net, data, optim, crit):
 	i = 1
 	for d in data:
 		q, feats, targets = d[0], d[1][0][1], d[2]
-		targets = torch.tensor(targets).unsqueeze(0)
+		targets = torch.tensor(targets).unsqueeze(0).to(net.device)
 		if "labels" in feats.keys():
 			feats.pop("labels")
 		net.zero_grad()

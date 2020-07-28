@@ -10,10 +10,11 @@ with warnings.catch_warnings():
 "Reference: http://jalammar.github.io/a-visual-guide-to-using-bert-for-the-first-time/"
 
 class QuestionEmbed(nn.Module):
-	def __init__(self):
+	def __init__(self, device):
 		super(QuestionEmbed, self).__init__()
-		self.model = DistilBertModel.from_pretrained('distilbert-base-uncased-distilled-squad')
-		self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased-distilled-squad')
+		self.device = device
+		self.model = DistilBertModel.from_pretrained('distilbert-base-uncased-distilled-squad').to(self.device)
+		self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased-distilled-squad').to(self.device)
 		self.max_len = 17
 
 	def process(self, sentences):
